@@ -1,4 +1,5 @@
 const { generateLargePrime } = require('./millerRabin.cjs');
+const readline = require('readline');
 
 // Helper Functions
 function gcd(a, b) {
@@ -59,37 +60,71 @@ function rsaDecrypt(ciphertext, privateKey) {
   const { d, n } = privateKey;
   return modExp(ciphertext, d, n);
 }
+function randomBigInt(bitLength) {
+  let rand = 0n;
+  let bitsGenerated = 0;
 
-// Oblivious Transfer
-function obliviousTransfer(bitLength) {
-  // Sender's messages
-  const m0 = 12345n; // Ensure messages are BigInt
-  const m1 = 67890n;
+  while (bitsGenerated < bitLength) {
+    const rnd = BigInt(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER));
+    rand = (rand << 53n) | rnd;
+    bitsGenerated += 53;
+  }
 
-  // Generate RSA keys
-  const { publicKey, privateKey } = generateRSAKeys(bitLength);
-
-  // Receiver's choice and random blinding factor
-  const choice = 0n; // Receiver's choice (0 or 1 as BigInt)
-  const r = 123n; // Random BigInt for blinding
-
-  // Encrypt both messages
-  const c0 = rsaEncrypt(m0 + r, publicKey); // Add blinding to m0
-  const c1 = rsaEncrypt(m1 + r, publicKey); // Add blinding to m1
-
-  // Sender sends both encrypted messages
-  const receivedCiphertext = choice === 0n ? c0 : c1; // Receiver selects one ciphertext
-
-  // Receiver decrypts and removes the blinding factor
-  const decryptedMessage = rsaDecrypt(receivedCiphertext, privateKey) - r;
-
-  return {
-    senderMessages: { m0, m1 },
-    receiverChoice: choice,
-    receivedMessage: decryptedMessage,
-  };
+  const excess = bitsGenerated - bitLength;
+  if (excess > 0) {
+    rand = rand >> BigInt(excess);
+  }
+  return rand;
 }
 
-// Run Oblivious Transfer
-const result = obliviousTransfer(16);
-console.log('Oblivious Transfer Result:', result);
+
+// Oblivious Transfer
+
+async function obliviousTransfer(bitLength = 16) {
+  // Sender's messages as BigInts
+  const messages = [12345n, 67890n]
+
+  // 1. Generate RSA keys
+  const { publicKey, privateKey } = generateRSAKeys(bitLength);
+
+  // 2. Print the public key and the message pair
+  console.log("Public Key (n, e):", publicKey);
+  console.log("Sender's messages: m0 =", messages[0].toString(), ", m1 =", messages[1].toString());
+
+  // 3. Prompt the user for a choice (0 or 1)
+  const choice = await new Promise((resolve) => {
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+    rl.question("Enter choice (0 or 1): ", (answer) => {
+      rl.close();
+      resolve(answer.trim());
+    });
+  });
+
+  // Convert choice to BigInt (assuming valid input of '0' or '1')
+  const receiverChoice = BigInt(choice);
+
+  // Generate v
+  const r = randomBigInt(bitLength); // Need to use PRNG for security
+
+  const k = rsaEncrypt(r, publicKey);
+  const v = (messages[receiverChoice] + k) % publicKey.n;
+
+  // 4. Sender decrypt both messages with blinding
+  const c0 = rsaDecrypt(v - messages[0], privateKey);
+  const c1 = rsaDecrypt(v - messages[1], privateKey);
+
+  const decryptMessages = [c0 + messages[0], c1 +messages[1]]
+
+  // 5. Receiver decrypts desired message
+  const desiredMessage = decryptMessages[receiverChoice] - r;
+
+  // Print or return the result as you see fit
+  console.log("\n--- Oblivious Transfer Result ---");
+  console.log("Receiver choice:", receiverChoice.toString());
+  console.log("Decrypted message:", desiredMessage.toString());
+}
+
+obliviousTransfer();
